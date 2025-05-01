@@ -1,7 +1,4 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()  # بارگذاری متغیرها
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')  # دریافت توکن
 import re
 import logging
 import requests
@@ -9,9 +6,17 @@ from urllib.parse import urlparse
 import instaloader
 from typing import List, Tuple, Optional
 from telegram import Update, InputMediaPhoto, InputMediaVideo
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+from dotenv import load_dotenv
 
+# بارگذاری متغیرهای محیطی
 load_dotenv()
+
+# دریافت توکن از متغیرهای محیطی
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+INSTA_USERNAME = os.getenv('INSTA_USERNAME')
+INSTA_PASSWORD = os.getenv('INSTA_PASSWORD')
+
 # تنظیمات لاگ
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -86,12 +91,12 @@ class TelegramBot:
     def __init__(self, token: str, insta_downloader: InstagramDownloader):
         self.token = token
         self.insta_downloader = insta_downloader
-        self.updater = Updater(token=token, use_context=True)
+        self.updater = Updater(token=token)
         self.dispatcher = self.updater.dispatcher
 
         # Register handlers
         self.dispatcher.add_handler(CommandHandler("start", self.start))
-        self.dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), self.handle_message))
+        self.dispatcher.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_message))
 
     def start(self, update: Update, context: CallbackContext):
         update.message.reply_text(
@@ -100,6 +105,9 @@ class TelegramBot:
         )
 
     def handle_message(self, update: Update, context: CallbackContext):
+        if not update.message or not update.message.text:
+            return
+
         url = update.message.text
         if not self.is_instagram_url(url):
             update.message.reply_text("Please send a valid Instagram URL")
@@ -173,9 +181,6 @@ class TelegramBot:
         self.updater.idle()
 
 def main():
-    # Get configuration from environment variables
-   
-
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN environment variable is required!")
         return
@@ -186,8 +191,12 @@ def main():
         if not insta_downloader.login(INSTA_USERNAME, INSTA_PASSWORD):
             logger.warning("Instagram login failed. Continuing without login...")
 
-    bot = TelegramBot(TELEGRAM_TOKEN, insta_downloader)
-    bot.start_bot()
+    try:
+        bot = TelegramBot(TELEGRAM_TOKEN, insta_downloader)
+        logger.info("Bot started successfully!")
+        bot.start_bot()
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
 
 if __name__ == '__main__':
     main()
