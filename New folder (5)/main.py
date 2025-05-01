@@ -1,12 +1,12 @@
 import os
 import re
-import logging
 import requests
 from urllib.parse import urlparse
 import instaloader
-from typing import List, Tuple, Optional
+from typing import Optional, Tuple, List  # اضافه کردن این خط
 from telegram import Update, InputMediaPhoto, InputMediaVideo
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import logging
 
 # تنظیمات لاگ
 logging.basicConfig(
@@ -29,15 +29,51 @@ class InstagramDownloader:
         }
 
     def login(self, username: str, password: str) -> bool:
+        """ورود به حساب اینستاگرام"""
         try:
             self.loader.context.login(username, password)
-            logger.info("Login successful")
+            logger.info("با موفقیت به اینستاگرام وارد شدیم")
             return True
         except Exception as e:
-            logger.error(f"Login failed: {e}")
+            logger.error(f"خطا در ورود به اینستاگرام: {e}")
             return False
 
-    def get_post_info(self, url: str) -> Tuple[List[Tuple[str, str]], str]:
+    def sanitize_filename(self, filename: str) -> str:
+        """پاکسازی نام فایل برای ذخیره سازی"""
+        return re.sub(r'[\\/*?:"<>|]', '', filename)
+
+    def download_media(self, url: str, filename: str = None) -> Optional[str]:
+        """دانلود مدیا از URL"""
+        try:
+            response = self.session.get(url, headers=self.headers, stream=True, timeout=60)
+            response.raise_for_status()
+
+            if not filename:
+                filename = os.path.basename(urlparse(url).path)
+
+            filename = self.sanitize_filename(filename)
+            
+            if not os.path.splitext(filename)[1]:
+                if 'image' in response.headers.get('content-type', ''):
+                    filename += '.jpg'
+                elif 'video' in response.headers.get('content-type', ''):
+                    filename += '.mp4'
+
+            os.makedirs('downloads', exist_ok=True)
+            save_path = os.path.join('downloads', filename)
+
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(1024):
+                    f.write(chunk)
+
+            logger.info(f"مدیا با موفقیت دانلود شد: {save_path}")
+            return save_path
+        except Exception as e:
+            logger.error(f"خطا در دانلود مدیا: {e}")
+            return None
+
+    def get_post_info(self, url: str) -> Tuple[List[Tuple[str, str, str]], str]:
+        """دریافت اطلاعات پست"""
         try:
             shortcode = self.get_shortcode(url)
             post = instaloader.Post.from_shortcode(self.loader.context, shortcode)
@@ -46,37 +82,43 @@ class InstagramDownloader:
             caption = post.caption if post.caption else ""
             
             if post.typename == 'GraphSidecar':
-                for node in post.get_sidecar_nodes():
+                for idx, node in enumerate(post.get_sidecar_nodes(), start=1):
                     if node.is_video:
-                        media_list.append((node.video_url, 'video'))
+                        media_url = node.video_url
+                        media_type = 'video'
+                        ext = '.mp4'
                     else:
-                        media_list.append((node.display_url, 'photo'))
+                        media_url = node.display_url
+                        media_type = 'photo'
+                        ext = '.jpg'
+                    
+                    filename = f"{post.owner_username}_post_{post.shortcode}_{idx}{ext}"
+                    media_list.append((media_url, media_type, filename))
             else:
                 if post.is_video:
-                    media_list.append((post.video_url, 'video'))
+                    media_url = post.video_url
+                    media_type = 'video'
+                    ext = '.mp4'
                 else:
-                    media_list.append((post.url, 'photo'))
+                    media_url = post.url
+                    media_type = 'photo'
+                    ext = '.jpg'
+                
+                filename = f"{post.owner_username}_post_{post.shortcode}{ext}"
+                media_list.append((media_url, media_type, filename))
             
             return media_list, caption
         except Exception as e:
-            logger.error(f"Error getting post info: {e}")
+            logger.error(f"خطا در دریافت اطلاعات پست: {e}")
             return [], ""
 
     def get_shortcode(self, url: str) -> str:
+        """استخراج shortcode از URL"""
         pattern = r'(?:https?://)?(?:www\.)?instagram\.com/(?:p|reel|tv)/([^/?#&]+)'
         match = re.search(pattern, url)
         if match:
             return match.group(1)
-        raise ValueError("Invalid Instagram URL")
-
-    def download_media(self, url: str) -> Optional[bytes]:
-        try:
-            response = self.session.get(url, headers=self.headers, timeout=60)
-            response.raise_for_status()
-            return response.content
-        except Exception as e:
-            logger.error(f"Download error: {e}")
-            return None
+        raise ValueError("لینک اینستاگرام نامعتبر است.")
 
 class TelegramBot:
     def __init__(self, token: str, insta_downloader: InstagramDownloader):
@@ -85,47 +127,50 @@ class TelegramBot:
         self.updater = Updater(token=token, use_context=True)
         self.dispatcher = self.updater.dispatcher
 
-        # Register handlers
+        # ثبت هندلرها
         self.dispatcher.add_handler(CommandHandler("start", self.start))
         self.dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), self.handle_message))
 
     def start(self, update: Update, context: CallbackContext):
-        update.message.reply_text(
-            "🤖 Instagram Downloader Bot 🤖\n\n"
-            "Send me an Instagram post/reel/IGTV link to download it."
-        )
+        """هندلر دستور /start"""
+        welcome_message = """
+        🤖 ربات دانلودر اینستاگرام 🤖
+
+        لطفا لینک پست، ریلس، یا IGTV اینستاگرام را ارسال کنید.
+
+        نکات:
+        - لینک باید مستقیم از اینستاگرام باشد
+        - برای پست‌های خصوصی، ربات باید با حساب اینستاگرام شما لاگین کرده باشد
+        """
+        update.message.reply_text(welcome_message)
 
     def handle_message(self, update: Update, context: CallbackContext):
-        url = update.message.text
-        if not self.is_instagram_url(url):
-            update.message.reply_text("Please send a valid Instagram URL")
+        """هندلر پیام‌های کاربر"""
+        text = update.message.text
+        chat_id = update.message.chat_id
+        
+        if not self.is_valid_instagram_url(text):
+            update.message.reply_text("لطفا یک لینک معتبر اینستاگرام ارسال کنید.")
             return
-
-        update.message.reply_text("Processing...")
         
         try:
-            media_list, caption = self.insta_downloader.get_post_info(url)
-            if not media_list:
-                update.message.reply_text("Failed to get media. The post might be private.")
-                return
-
-            downloaded_media = []
-            for media_url, media_type in media_list:
-                content = self.insta_downloader.download_media(media_url)
-                if content:
-                    downloaded_media.append((content, media_type))
-
-            if not downloaded_media:
-                update.message.reply_text("Failed to download media")
-                return
-
-            self.send_media(update, downloaded_media, caption)
-
+            update.message.reply_text("در حال پردازش لینک... لطفا صبر کنید.")
+            
+            if '/reel/' in text or '/reels/' in text:
+                self.handle_reel(update, text)
+            elif '/tv/' in text:
+                self.handle_igtv(update, text)
+            elif '/p/' in text:
+                self.handle_post(update, text)
+            else:
+                update.message.reply_text("این نوع لینک پشتیبانی نمی‌شود.")
+        
         except Exception as e:
-            logger.error(f"Error: {e}")
-            update.message.reply_text(f"An error occurred: {str(e)}")
+            logger.error(f"خطا در پردازش لینک: {e}")
+            update.message.reply_text(f"خطا در پردازش لینک: {str(e)}")
 
-    def is_instagram_url(self, url: str) -> bool:
+    def is_valid_instagram_url(self, url: str) -> bool:
+        """بررسی معتبر بودن URL اینستاگرام"""
         patterns = [
             r'https?://(www\.)?instagram\.com/p/',
             r'https?://(www\.)?instagram\.com/reel/',
@@ -134,58 +179,137 @@ class TelegramBot:
         ]
         return any(re.search(pattern, url) for pattern in patterns)
 
-    def send_media(self, update: Update, media_list: List[Tuple[bytes, str]], caption: str):
-        if len(media_list) == 1:
-            content, media_type = media_list[0]
+    def handle_post(self, update: Update, post_url: str):
+        """پردازش پست اینستاگرام"""
+        media_list, caption = self.insta_downloader.get_post_info(post_url)
+        
+        if not media_list:
+            update.message.reply_text("خطا در دریافت پست. ممکن است پست خصوصی باشد.")
+            return
+        
+        try:
+            downloaded_files = []
+            for media_url, media_type, filename in media_list:
+                file_path = self.insta_downloader.download_media(media_url, filename)
+                if file_path:
+                    downloaded_files.append((file_path, media_type))
+            
+            if not downloaded_files:
+                update.message.reply_text("خطا در دانلود محتوا")
+                return
+            
+            self.send_media(update, downloaded_files, caption)
+            
+        finally:
+            self.cleanup_files(downloaded_files)
+
+    def handle_reel(self, update: Update, reel_url: str):
+        """پردازش ریلس"""
+        media_list, caption = self.insta_downloader.get_post_info(reel_url)  # IGTV و ریلس همانند پست پردازش می‌شوند
+        
+        if not media_list:
+            update.message.reply_text("خطا در دریافت ریلس. ممکن است محتوا خصوصی باشد.")
+            return
+        
+        try:
+            downloaded_files = []
+            for media_url, media_type, filename in media_list:
+                file_path = self.insta_downloader.download_media(media_url, filename)
+                if file_path:
+                    downloaded_files.append((file_path, media_type))
+            
+            if not downloaded_files:
+                update.message.reply_text("خطا در دانلود ریلس")
+                return
+            
+            self.send_media(update, downloaded_files, caption)
+            
+        finally:
+            self.cleanup_files(downloaded_files)
+
+    def handle_igtv(self, update: Update, igtv_url: str):
+        """پردازش IGTV"""
+        self.handle_reel(update, igtv_url)  # پردازش همانند ریلس
+
+    def send_media(self, update: Update, files: List[Tuple[str, str]], caption: str = ""):
+        """ارسال مدیا به کاربر"""
+        if len(files) == 1:
+            file_path, media_type = files[0]
             try:
-                if media_type == 'photo':
-                    update.message.reply_photo(photo=content, caption=caption[:1000])
-                else:
-                    update.message.reply_video(video=content, caption=caption[:1000])
+                with open(file_path, 'rb') as media_file:
+                    if media_type == 'photo':
+                        update.message.reply_photo(
+                            photo=media_file,
+                            caption=caption[:1000] if caption else None
+                        )
+                    else:
+                        update.message.reply_video(
+                            video=media_file,
+                            caption=caption[:1000] if caption else None,
+                            supports_streaming=True
+                        )
             except Exception as e:
-                logger.error(f"Send media error: {e}")
+                logger.error(f"خطا در ارسال مدیا: {e}")
+                update.message.reply_text("خطا در ارسال محتوا")
         else:
             media_group = []
-            for idx, (content, media_type) in enumerate(media_list):
+            for idx, (file_path, media_type) in enumerate(files):
                 try:
-                    if media_type == 'photo':
-                        media = InputMediaPhoto(media=content, caption=caption[:1000] if idx == 0 else None)
-                    else:
-                        media = InputMediaVideo(media=content, caption=caption[:1000] if idx == 0 else None)
-                    media_group.append(media)
+                    with open(file_path, 'rb') as media_file:
+                        if media_type == 'photo':
+                            media = InputMediaPhoto(
+                                media=media_file,
+                                caption=caption[:1000] if idx == 0 and caption else None
+                            )
+                        else:
+                            media = InputMediaVideo(
+                                media=media_file,
+                                caption=caption[:1000] if idx == 0 and caption else None
+                            )
+                        media_group.append(media)
                 except Exception as e:
-                    logger.error(f"Media group error: {e}")
+                    logger.error(f"خطا در آماده‌سازی مدیا گروهی: {e}")
                     continue
-
+            
             if media_group:
                 try:
                     update.message.reply_media_group(media=media_group)
                 except Exception as e:
-                    logger.error(f"Media group send error: {e}")
+                    logger.error(f"خطا در ارسال مدیا گروهی: {e}")
+                    update.message.reply_text("خطا در ارسال محتوای چندگانه")
+
+    def cleanup_files(self, files: List[Tuple[str, str]]):
+        """پاکسازی فایل‌های موقت"""
+        for file_path, _ in files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                logger.error(f"خطا در حذف فایل موقت: {e}")
 
     def start_bot(self):
-        logger.info("Bot started")
+        """شروع کار بات"""
+        logger.info("ربات در حال اجرا...")
         self.updater.start_polling()
         self.updater.idle()
 
 def main():
-    # Get configuration from environment variables
-    TOKEN = os.getenv('TELEGRAM_TOKEN')
-    INSTA_USERNAME = os.environ.get('INSTA_USERNAME')
-    INSTA_PASSWORD = os.environ.get('INSTA_PASSWORD')
-
-    if not TELEGRAM_TOKEN:
-        logger.error("TELEGRAM_TOKEN environment variable is required!")
-        return
-
+    # تنظیمات
+    TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+    INSTA_USERNAME = None  # اگر نیاز به لاگین باشد
+    INSTA_PASSWORD = None  # اگر نیاز به لاگین باشد
+    
+    # ایجاد دانلودر اینستاگرام
     insta_downloader = InstagramDownloader()
     
+    # اگر اطلاعات ورود اینستاگرام وجود دارد، لاگین کن
     if INSTA_USERNAME and INSTA_PASSWORD:
         if not insta_downloader.login(INSTA_USERNAME, INSTA_PASSWORD):
-            logger.warning("Instagram login failed. Continuing without login...")
-
-    bot = TelegramBot(TELEGRAM_TOKEN, insta_downloader)
-    bot.start_bot()
+            logger.warning("نمی‌توان با اطلاعات ورود ارائه شده وارد شد. ادامه بدون لاگین...")
+    
+    # ایجاد و شروع بات تلگرام
+    telegram_bot = TelegramBot(TELEGRAM_TOKEN, insta_downloader)
+    telegram_bot.start_bot()
 
 if __name__ == '__main__':
     main()
