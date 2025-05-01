@@ -7,7 +7,8 @@ import instaloader
 from typing import List, Tuple, Optional
 from telegram import Update, InputMediaPhoto, InputMediaVideo
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-
+from dotenv import load_dotenv
+load_dotenv()
 # تنظیمات لاگ
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -170,7 +171,7 @@ class TelegramBot:
 
 def main():
     # Get configuration from environment variables
-    TOKEN = os.getenv('TELEGRAM_TOKEN')
+    TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
     INSTA_USERNAME = os.environ.get('INSTA_USERNAME')
     INSTA_PASSWORD = os.environ.get('INSTA_PASSWORD')
 
