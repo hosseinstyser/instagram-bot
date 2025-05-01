@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()  # بارگذاری متغیرها
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')  # دریافت توکن
+assert TELEGRAM_TOKEN, "لطفا TELEGRAM_TOKEN را در تنظیمات محیطی تنظیم کنید!"
 import re
 import logging
 import requests
@@ -7,7 +11,7 @@ import instaloader
 from typing import List, Tuple, Optional
 from telegram import Update, InputMediaPhoto, InputMediaVideo
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from dotenv import load_dotenv
+
 load_dotenv()
 # تنظیمات لاگ
 logging.basicConfig(
