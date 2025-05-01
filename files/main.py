@@ -2,7 +2,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv()  # بارگذاری متغیرها
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')  # دریافت توکن
-assert TELEGRAM_TOKEN, "لطفا TELEGRAM_TOKEN را در تنظیمات محیطی تنظیم کنید!"
+if not TELEGRAM_TOKEN:
+    print("❌ خطا: متغیر TELEGRAM_TOKEN یافت نشد! مقادیر موجود:")
+    print(os.environ)  # نمایش تمام متغیرهای محیطی
+    raise ValueError("لطفا TELEGRAM_TOKEN را تنظیم کنید")
 import re
 import logging
 import requests
