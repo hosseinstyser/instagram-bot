@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import instaloader
 from typing import Optional, Tuple, List  # اضافه کردن این خط
 from telegram import Update, InputMediaPhoto, InputMediaVideo
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 import logging
 
 # تنظیمات لاگ
@@ -129,7 +129,7 @@ class TelegramBot:
 
         # ثبت هندلرها
         self.dispatcher.add_handler(CommandHandler("start", self.start))
-        self.dispatcher.add_handler(MessageHandler(filters.text & (~filters.command), self.handle_message))
+        self.dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), self.handle_message))
 
     def start(self, update: Update, context: CallbackContext):
         """هندلر دستور /start"""
